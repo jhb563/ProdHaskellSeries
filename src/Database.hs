@@ -5,13 +5,19 @@ module Database where
 import           Control.Monad.Logger (runStdoutLoggingT, MonadLogger, LoggingT)
 import           Control.Monad.Reader (runReaderT)
 import           Control.Monad.IO.Class (MonadIO)
-import           Database.Persist (selectList, (==.), (<.), SelectOpt(..), Entity)
+import           Data.Int (Int64)
+import           Database.Persist (get, insert, delete)
+import           Database.Persist.Sql (fromSqlKey, toSqlKey)
 import           Database.Persist.Postgresql (ConnectionString, withPostgresqlConn, runMigration, SqlPersistT)
 
 import           Schema
 
 localConnString :: ConnectionString
 localConnString = "host=127.0.0.1 port=5432 user=postgres dbname=postgres"
+
+-- This is IO since in a real application we'd want to configure it.
+fetchPostgresConnection :: IO ConnectionString
+fetchPostgresConnection = return localConnString
 
 runAction :: ConnectionString -> SqlPersistT (LoggingT IO) a -> IO a
 runAction connectionString action = 
@@ -21,9 +27,14 @@ runAction connectionString action =
 migrateDB :: ConnectionString -> IO ()
 migrateDB connString = runAction connString (runMigration migrateAll)
 
-selectYoungTeachers :: (MonadIO m) => SqlPersistT m [Entity User]
-selectYoungTeachers = selectList [UserAge <. 25, UserOccupation ==. "Teacher"] []
+fetchUserPG :: ConnectionString -> Int64 -> IO (Maybe User)
+fetchUserPG connString uid = runAction connString (get (toSqlKey uid))
 
-selectYoungTeachers' :: (MonadIO m) => SqlPersistT m [Entity User]
-selectYoungTeachers' = selectList
-  [UserAge <. 25, UserOccupation ==. "Teacher"] [Asc UserEmail, OffsetBy 5, LimitTo 100]
+createUserPG :: ConnectionString -> User -> IO Int64
+createUserPG connString user = fromSqlKey <$> runAction connString (insert user)
+
+deleteUserPG :: ConnectionString -> Int64 -> IO ()
+deleteUserPG connString uid = runAction connString (delete userKey)
+  where
+    userKey :: Key User
+    userKey = toSqlKey uid

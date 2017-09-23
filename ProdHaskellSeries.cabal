@@ -16,16 +16,23 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:
+    API
     Database
     Schema
   build-depends:       
     base >= 4.7 && < 5
+    , aeson
     , monad-logger
     , mtl
     , persistent
     , persistent-postgresql
     , persistent-template
+    , servant
+    , servant-client
+    , servant-server
+    , transformers
     , text
+    , warp
   default-language:    Haskell2010
 
 executable migrate-db
