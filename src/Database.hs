@@ -21,9 +21,9 @@ runAction connectionString action =
 migrateDB :: ConnectionString -> IO ()
 migrateDB connString = runAction connString (runMigration migrateAll)
 
-selectYoungTeachers :: (MonadIO m, MonadLogger m) => SqlPersistT m [Entity User]
+selectYoungTeachers :: (MonadIO m) => SqlPersistT m [Entity User]
 selectYoungTeachers = selectList [UserAge <. 25, UserOccupation ==. "Teacher"] []
 
-selectYoungTeachers' :: (MonadIO m, MonadLogger m) => SqlPersistT m [Entity User]
+selectYoungTeachers' :: (MonadIO m) => SqlPersistT m [Entity User]
 selectYoungTeachers' = selectList
   [UserAge <. 25, UserOccupation ==. "Teacher"] [Asc UserEmail, OffsetBy 5, LimitTo 100]
