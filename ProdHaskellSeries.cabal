@@ -33,6 +33,8 @@ library
     , transformers
     , text
     , warp
+    , hedis
+    , bytestring
   default-language:    Haskell2010
 
 executable migrate-db

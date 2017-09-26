@@ -9,13 +9,13 @@ import           Control.Monad.Trans.Except (throwE)
 import           Data.Int (Int64)
 import           Data.Proxy (Proxy(..))
 import           Database.Persist (Key, Entity)
-import           Database.Persist.Postgresql (ConnectionString)
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Client
 import           Servant.Server
 
-import           Database (fetchUserPG, createUserPG, fetchPostgresConnection)
+import           Database (fetchUserPG, createUserPG, fetchPostgresConnection, PGInfo, RedisInfo,
+                           fetchUserRedis, cacheUser, fetchRedisConnection)
 import           Schema
 
 type UsersAPI = 
@@ -25,23 +25,28 @@ type UsersAPI =
 usersAPI :: Proxy UsersAPI
 usersAPI = Proxy :: Proxy UsersAPI
 
-fetchUsersHandler :: ConnectionString -> Int64 -> Handler User
-fetchUsersHandler connString uid = do
-  maybeUser <- liftIO $ fetchUserPG connString uid
-  case maybeUser of
+fetchUsersHandler :: PGInfo -> RedisInfo -> Int64 -> Handler User
+fetchUsersHandler pgInfo redisInfo uid = do
+  maybeCachedUser <- liftIO $ fetchUserRedis redisInfo uid
+  case maybeCachedUser of
     Just user -> return user
-    Nothing -> Handler $ (throwE $ err401 { errBody = "Could not find user with that ID" })
+    Nothing -> do
+      maybeUser <- liftIO $ fetchUserPG pgInfo uid
+      case maybeUser of
+        Just user -> liftIO (cacheUser redisInfo uid user) >> return user
+        Nothing -> Handler $ (throwE $ err401 { errBody = "Could not find user with that ID" })
 
-createUserHandler :: ConnectionString -> User -> Handler Int64
-createUserHandler connString user = liftIO $ createUserPG connString user
+createUserHandler :: PGInfo -> User -> Handler Int64
+createUserHandler pgInfo user = liftIO $ createUserPG pgInfo user
 
-usersServer :: ConnectionString -> Server UsersAPI
-usersServer connString = 
-  (fetchUsersHandler connString) :<|> 
-  (createUserHandler connString)
+usersServer :: PGInfo -> RedisInfo -> Server UsersAPI
+usersServer pgInfo redisInfo =
+  (fetchUsersHandler pgInfo redisInfo) :<|>
+  (createUserHandler pgInfo)
 
 
 runServer :: IO ()
 runServer = do
-  connString <- fetchPostgresConnection
-  run 8000 (serve usersAPI (usersServer connString))
+  pgInfo <- fetchPostgresConnection
+  redisInfo <- fetchRedisConnection
+  run 8000 (serve usersAPI (usersServer pgInfo redisInfo))
