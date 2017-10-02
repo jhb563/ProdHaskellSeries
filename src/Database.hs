@@ -3,7 +3,7 @@
 module Database where
 
 import           Control.Monad (void)
-import           Control.Monad.Logger (runStdoutLoggingT, MonadLogger, LoggingT)
+import           Control.Monad.Logger (runStdoutLoggingT, MonadLogger, LoggingT, LogLevel(..), filterLogger)
 import           Control.Monad.Reader (runReaderT)
 import           Control.Monad.IO.Class (MonadIO)
 import           Data.ByteString.Char8 (pack, unpack)
@@ -11,7 +11,7 @@ import           Data.Int (Int64)
 import           Database.Persist (get, insert, delete)
 import           Database.Persist.Sql (fromSqlKey, toSqlKey)
 import           Database.Persist.Postgresql (ConnectionString, withPostgresqlConn, runMigration, SqlPersistT)
-import           Database.Redis (ConnectInfo, connect, Redis, runRedis, defaultConnectInfo, setex)
+import           Database.Redis (ConnectInfo, connect, Redis, runRedis, defaultConnectInfo, setex, del)
 import qualified Database.Redis as Redis
 
 import           Schema
@@ -22,6 +22,13 @@ type RedisInfo = ConnectInfo
 localConnString :: PGInfo
 localConnString = "host=127.0.0.1 port=5432 user=postgres dbname=postgres"
 
+logFilter :: a -> LogLevel -> Bool
+logFilter _ LevelError     = True
+logFilter _ LevelWarn      = True
+logFilter _ LevelInfo      = True
+logFilter _ LevelDebug     = False
+logFilter _ (LevelOther _) = False
+
 -- This is IO since in a real application we'd want to configure it.
 fetchPostgresConnection :: IO PGInfo
 fetchPostgresConnection = return localConnString
@@ -31,7 +38,7 @@ fetchRedisConnection = return defaultConnectInfo
 
 runAction :: PGInfo -> SqlPersistT (LoggingT IO) a -> IO a
 runAction connectionString action = 
-  runStdoutLoggingT $ withPostgresqlConn connectionString $ \backend ->
+  runStdoutLoggingT $ filterLogger logFilter $ withPostgresqlConn connectionString $ \backend ->
     runReaderT action backend
 
 migrateDB :: PGInfo -> IO ()
@@ -63,3 +70,10 @@ fetchUserRedis redisInfo uid = runRedisAction redisInfo $ do
   case result of
     Right (Just userString) -> return $ Just (read . unpack $ userString)
     _ -> return Nothing
+
+deleteUserCache :: RedisInfo -> Int64 -> IO ()
+deleteUserCache redisInfo uid = do
+  connection <- connect redisInfo
+  runRedis connection $ do
+    _ <- del [pack . show $ uid]
+    return ()
