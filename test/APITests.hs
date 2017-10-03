@@ -3,13 +3,11 @@
 module Main where
 
 import Control.Concurrent (killThread)
+import Data.Either (isLeft)
 import Data.Int (Int64)
 import Data.Maybe (isJust)
 import Database.Persist.Postgresql (fromSqlKey)
-import Network.HTTP.Client (newManager)
-import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Servant.Client (ClientEnv(..), runClientM)
-import Servant.Common.BaseUrl (parseBaseUrl)
+import Servant.Client (runClientM, ClientEnv)
 import Test.Hspec
 
 import API (fetchUserClient, createUserClient)
@@ -19,27 +17,26 @@ import TestUtils (setupTests)
 
 main :: IO ()
 main = do
-  (pgInfo, redisInfo, tid) <- setupTests
-  mgr <- newManager tlsManagerSettings
-  baseUrl <- parseBaseUrl "http://127.0.0.1:8000"
-  let clientEnv = ClientEnv mgr baseUrl
+  (pgInfo, redisInfo, clientEnv, tid) <- setupTests
   hspec $ before (beforeHook1 clientEnv pgInfo redisInfo) spec1
   hspec $ before (beforeHook2 clientEnv pgInfo redisInfo) $ after (afterHook pgInfo redisInfo) $ spec2
   hspec $ before (beforeHook3 clientEnv pgInfo redisInfo) $ after (afterHook pgInfo redisInfo) $ spec3
   killThread tid 
   return ()
 
-beforeHook1 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool)
+beforeHook1 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Bool)
 beforeHook1 clientEnv pgInfo redisInfo = do
-  _ <- runClientM (fetchUserClient 1) clientEnv
+  callResult <- runClientM (fetchUserClient 1) clientEnv
+  let throwsError = isLeft (callResult)
   inPG <- isJust <$> fetchUserPG pgInfo 1
   inRedis <- isJust <$> fetchUserRedis redisInfo 1
-  return (inPG, inRedis)
+  return (throwsError, inPG, inRedis)
 
-spec1 :: SpecWith (Bool, Bool)
+spec1 :: SpecWith (Bool, Bool, Bool)
 spec1 = describe "After fetching on an empty database" $ do
-  it "There should be no user in Postgres" $ \(inPG, _) -> inPG `shouldBe` False
-  it "There should be no user in Redis" $ \(_, inRedis) -> inRedis `shouldBe` False
+  it "The fetch call should throw an error" $ \(throwsError, _, _) -> throwsError `shouldBe` True
+  it "There should be no user in Postgres" $ \(_, inPG, _) -> inPG `shouldBe` False
+  it "There should be no user in Redis" $ \(_, _, inRedis) -> inRedis `shouldBe` False
 
 beforeHook2 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Int64)
 beforeHook2 clientEnv pgInfo redisInfo = do
