@@ -3,16 +3,12 @@ version: '2'
 services:
   postgres:
     image: postgres:9.6
-    container_name: docker-practice-postgres
-    environment:
-      - POSTGRES_USER:'admin'
-      - POSTGRES_DB:'my_db'
-      - POSTGRES_PASSWORD:'password'
+    container_name: prod-haskell-series-postgres
     ports:
       - "5432:5432"
 
   redis:
     image: redis:4.0
-    container_name: docker-practice-redis
+    container_name: prod-haskell-series-redis
     ports:
       - "6379:6379"
