@@ -22,6 +22,7 @@ library
   build-depends:       
     base >= 4.7 && < 5
     , aeson
+    , esqueleto
     , monad-logger
     , mtl
     , persistent
@@ -32,6 +33,7 @@ library
     , servant-server
     , transformers
     , text
+    , time
     , warp
     , hedis
     , bytestring
@@ -59,6 +61,7 @@ test-suite api-tests
     , monad-logger
     , mtl
     , servant-client
+    , time
     , persistent-postgresql
     , ProdHaskellSeries
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
