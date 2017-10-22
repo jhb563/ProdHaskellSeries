@@ -3,7 +3,7 @@
 
 module Monad.App where
 
-import Control.Exception.Safe (handleAny, MonadCatch, SomeException, Exception)
+import Control.Exception.Safe (handleAny, SomeException, Exception)
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (LoggingT)
@@ -13,11 +13,10 @@ import Database.Persist.Sql (SqlPersistT)
 import Database.Redis (runRedis, connect, Redis)
 import Servant.Server ((:~>)(..), Handler, ServantErr(..), Handler(..), err500)
 
-import Cache ()
-import Database (runPGAction)
+import Cache (RedisInfo)
+import Database (runPGAction, PGInfo)
 import Monad.Cache (MonadCache(..))
 import Monad.Database (MonadDatabase(..))
-import Types (RedisInfo, PGInfo)
 
 newtype AppMonad a = AppMonad (ReaderT RedisInfo (SqlPersistT (LoggingT IO)) a)
   deriving (Functor, Applicative, Monad)

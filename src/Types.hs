@@ -1,7 +1,20 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Types where
 
-import Database.Persist.Postgresql (ConnectionString)
-import Database.Redis (ConnectInfo)
+import Data.Aeson (ToJSON(..), FromJSON(..), (.=), object, (.:), withObject)
+import Data.Int (Int64)
 
-type PGInfo = ConnectionString
-type RedisInfo = ConnectInfo
+newtype KeyVal a = KeyVal (Int64, a)
+
+instance (ToJSON a) => ToJSON (KeyVal a) where
+  toJSON (KeyVal (key, val)) = object
+    [ "key" .= key
+    , "value" .= val
+    ]
+
+instance (FromJSON a) => FromJSON (KeyVal a) where
+  parseJSON = withObject "Key Val Item" $ \o -> do
+    key <- o .: "key"
+    val <- o .: "value"
+    return $ KeyVal (key, val)

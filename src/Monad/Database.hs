@@ -3,6 +3,7 @@ module Monad.Database where
 import Data.Int (Int64)
 
 import Schema
+import Types (KeyVal)
 
 class (Monad m) => MonadDatabase m where
   fetchUserDB :: Int64 -> m (Maybe User) 
@@ -11,5 +12,5 @@ class (Monad m) => MonadDatabase m where
   fetchArticleDB :: Int64 -> m (Maybe Article)
   createArticleDB :: Article -> m Int64
   deleteArticleDB :: Int64 -> m ()
-  fetchArticlesByAuthor :: Int64 -> m [(Int64, Article)]
-  fetchRecentArticles :: m [((Int64, User), (Int64, Article))]
+  fetchArticlesByAuthor :: Int64 -> m [KeyVal Article]
+  fetchRecentArticles :: m [(KeyVal User, KeyVal Article)]

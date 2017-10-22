@@ -4,71 +4,71 @@
 
 module API where
 
-import           Control.Monad.IO.Class (liftIO)
-import           Control.Monad.Trans.Except (throwE)
 import           Data.Int (Int64)
 import           Data.Proxy (Proxy(..))
-import           Database.Persist (Key, Entity)
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Client
 import           Servant.Server
 
-import           Database (fetchUserPG, createUserPG, fetchPostgresConnection,
-                           fetchUserRedis, cacheUser, fetchRedisConnection, createArticlePG,
-                           fetchArticlePG, fetchArticlesByAuthorPG, fetchRecentArticlesPG)
+import           Cache (fetchRedisConnection, RedisInfo)
+import           Database (fetchPostgresConnection, PGInfo)
+import           Monad.App (AppMonad, transformAppToHandler)
+import           Monad.Cache (MonadCache(..))
+import           Monad.Database (MonadDatabase(..))
 import           Schema
-import           Types (PGInfo, RedisInfo)
+import           Types (KeyVal(..))
 
 type FullAPI =
        "users" :> Capture "userid" Int64 :> Get '[JSON] User
   :<|> "users" :> ReqBody '[JSON] User :> Post '[JSON] Int64
   :<|> "articles" :> Capture "articleid" Int64 :> Get '[JSON] Article
   :<|> "articles" :> ReqBody '[JSON] Article :> Post '[JSON] Int64
-  :<|> "articles" :> "author" :> Capture "authorid" Int64 :> Get '[JSON] [Entity Article]
-  :<|> "articles" :> "recent" :> Get '[JSON] [(Entity User, Entity Article)]
+  :<|> "articles" :> "author" :> Capture "authorid" Int64 :> Get '[JSON] [KeyVal Article]
+  :<|> "articles" :> "recent" :> Get '[JSON] [(KeyVal User, KeyVal Article)]
 
 usersAPI :: Proxy FullAPI
 usersAPI = Proxy :: Proxy FullAPI
 
-fetchUsersHandler :: PGInfo -> RedisInfo -> Int64 -> Handler User
-fetchUsersHandler pgInfo redisInfo uid = do
-  maybeCachedUser <- liftIO $ fetchUserRedis redisInfo uid
+fetchUsersHandler :: Int64 -> AppMonad User
+fetchUsersHandler uid = do
+  maybeCachedUser <- fetchCachedUser uid
   case maybeCachedUser of
     Just user -> return user
     Nothing -> do
-      maybeUser <- liftIO $ fetchUserPG pgInfo uid
+      maybeUser <- fetchUserDB uid
       case maybeUser of
-        Just user -> liftIO (cacheUser redisInfo uid user) >> return user
-        Nothing -> Handler $ (throwE $ err401 { errBody = "Could not find user with that ID" })
+        Just user -> cacheUser uid user >> return user
+        Nothing -> error "Could not find user with that ID"
 
-createUserHandler :: PGInfo -> User -> Handler Int64
-createUserHandler pgInfo user = liftIO $ createUserPG pgInfo user
+createUserHandler :: User -> AppMonad Int64
+createUserHandler = createUserDB
 
-fetchArticleHandler :: PGInfo -> Int64 -> Handler Article
-fetchArticleHandler pgInfo aid = do
-  maybeArticle <- liftIO $ fetchArticlePG pgInfo aid
+fetchArticleHandler :: Int64 -> AppMonad Article
+fetchArticleHandler aid = do
+  maybeArticle <- fetchArticleDB aid
   case maybeArticle of
     Just article -> return article
-    Nothing -> Handler $ (throwE $ err401 { errBody = "Could not find article with that ID" })
+    Nothing -> error "Could not find article with that ID"
 
-createArticleHandler :: PGInfo -> Article -> Handler Int64
-createArticleHandler pgInfo article = liftIO $ createArticlePG pgInfo article
+createArticleHandler :: Article -> AppMonad Int64
+createArticleHandler = createArticleDB
 
-fetchArticlesByAuthorHandler :: PGInfo -> Int64 -> Handler [Entity Article]
-fetchArticlesByAuthorHandler pgInfo uid = liftIO $ fetchArticlesByAuthorPG pgInfo uid
+fetchArticlesByAuthorHandler :: Int64 -> AppMonad [KeyVal Article]
+fetchArticlesByAuthorHandler = fetchArticlesByAuthor
 
-fetchRecentArticlesHandler :: PGInfo -> Handler [(Entity User, Entity Article)]
-fetchRecentArticlesHandler pgInfo = liftIO $ fetchRecentArticlesPG pgInfo
+fetchRecentArticlesHandler :: AppMonad [(KeyVal User, KeyVal Article)]
+fetchRecentArticlesHandler = fetchRecentArticles
 
 fullAPIServer :: PGInfo -> RedisInfo -> Server FullAPI
 fullAPIServer pgInfo redisInfo =
-  (fetchUsersHandler pgInfo redisInfo) :<|>
-  (createUserHandler pgInfo) :<|>
-  (fetchArticleHandler pgInfo) :<|>
-  (createArticleHandler pgInfo) :<|>
-  (fetchArticlesByAuthorHandler pgInfo) :<|>
-  (fetchRecentArticlesHandler pgInfo)
+  enter (transformAppToHandler pgInfo redisInfo) $
+    fetchUsersHandler :<|>
+    createUserHandler :<|>
+    fetchArticleHandler :<|>
+    createArticleHandler :<|>
+    fetchArticlesByAuthorHandler :<|>
+    fetchRecentArticlesHandler
 
 runServer :: IO ()
 runServer = do
@@ -80,8 +80,8 @@ fetchUserClient :: Int64 -> ClientM User
 createUserClient :: User -> ClientM Int64
 fetchArticleClient :: Int64 -> ClientM Article
 createArticleClient :: Article -> ClientM Int64
-fetchArticlesByAuthorClient :: Int64 -> ClientM [Entity Article]
-fetchRecentArticlesClient :: ClientM [(Entity User, Entity Article)]
+fetchArticlesByAuthorClient :: Int64 -> ClientM [KeyVal Article]
+fetchRecentArticlesClient :: ClientM [(KeyVal User, KeyVal Article)]
 ( fetchUserClient             :<|>
   createUserClient            :<|>
   fetchArticleClient          :<|>
