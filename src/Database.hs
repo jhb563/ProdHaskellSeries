@@ -37,6 +37,11 @@ logFilter _ LevelInfo      = True
 logFilter _ LevelDebug     = False
 logFilter _ (LevelOther _) = False
 
+runPGAction :: PGInfo -> SqlPersistT (LoggingT IO) a -> IO a
+runPGAction connectionString action = runStdoutLoggingT $ filterLogger logFilter $
+  withPostgresqlConn connectionString $ \backend ->
+    runReaderT action backend
+
 -- This is IO since in a real application we'd want to configure it.
 fetchPostgresConnection :: IO PGInfo
 fetchPostgresConnection = return localConnString

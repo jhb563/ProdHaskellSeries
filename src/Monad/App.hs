@@ -1,18 +1,23 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Monad.App where
 
+import Control.Exception.Safe (handleAny, MonadCatch, SomeException, Exception)
+import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (LoggingT)
 import Control.Monad.Reader (ReaderT(..), ask)
+import Data.ByteString.Lazy.Char8 (pack)
 import Database.Persist.Sql (SqlPersistT)
 import Database.Redis (runRedis, connect, Redis)
+import Servant.Server ((:~>)(..), Handler, ServantErr(..), Handler(..), err500)
 
 import Cache ()
-import Database ()
+import Database (runPGAction)
 import Monad.Cache (MonadCache(..))
 import Monad.Database (MonadDatabase(..))
-import Types (RedisInfo)
+import Types (RedisInfo, PGInfo)
 
 newtype AppMonad a = AppMonad (ReaderT RedisInfo (SqlPersistT (LoggingT IO)) a)
   deriving (Functor, Applicative, Monad)
@@ -43,3 +48,16 @@ liftRedis action = do
   info <- AppMonad ask
   connection <- liftIO $ connect info
   liftIO $ runRedis connection action
+
+transformAppToHandler :: PGInfo -> RedisInfo -> AppMonad :~> Handler
+transformAppToHandler pgInfo redisInfo = NT $ \action -> do
+  result <- liftIO (handleAny handler (runAppAction action))
+  Handler $ either throwError return result
+  where
+    handler :: SomeException -> IO (Either ServantErr a)
+    handler e = return $ Left $ err500 { errBody = pack (show e)}
+
+    runAppAction :: Exception e => AppMonad a -> IO (Either e a)
+    runAppAction (AppMonad action) = do
+      result <- runPGAction pgInfo $ runReaderT action redisInfo
+      return $ Right result
