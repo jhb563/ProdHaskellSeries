@@ -14,10 +14,11 @@ import           Servant.API
 import           Servant.Client
 import           Servant.Server
 
-import           Database (fetchUserPG, createUserPG, fetchPostgresConnection, PGInfo, RedisInfo,
+import           Database (fetchUserPG, createUserPG, fetchPostgresConnection,
                            fetchUserRedis, cacheUser, fetchRedisConnection, createArticlePG,
                            fetchArticlePG, fetchArticlesByAuthorPG, fetchRecentArticlesPG)
 import           Schema
+import           Types (PGInfo, RedisInfo)
 
 type FullAPI =
        "users" :> Capture "userid" Int64 :> Get '[JSON] User

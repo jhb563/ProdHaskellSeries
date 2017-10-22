@@ -17,8 +17,13 @@ library
   hs-source-dirs:      src
   exposed-modules:
     API
+    Cache
     Database
+    Monad.App
+    Monad.Cache
+    Monad.Database
     Schema
+    Types
   build-depends:       
     base >= 4.7 && < 5
     , aeson
