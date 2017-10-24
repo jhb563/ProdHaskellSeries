@@ -11,9 +11,9 @@ import           Servant.API
 import           Servant.Client
 import           Servant.Server
 
-import           Cache (fetchRedisConnection, RedisInfo)
-import           Database (fetchPostgresConnection, PGInfo)
-import           Monad.App (AppMonad, transformAppToHandler)
+import           Cache (fetchRedisConnection)
+import           Database (fetchPostgresConnection)
+import           Monad.App (transformAppToHandler, AppMonad)
 import           Monad.Cache (MonadCache(..))
 import           Monad.Database (MonadDatabase(..))
 import           Schema
@@ -30,7 +30,7 @@ type FullAPI =
 usersAPI :: Proxy FullAPI
 usersAPI = Proxy :: Proxy FullAPI
 
-fetchUsersHandler :: Int64 -> AppMonad User
+fetchUsersHandler :: (MonadDatabase m, MonadCache m) => Int64 -> m User
 fetchUsersHandler uid = do
   maybeCachedUser <- fetchCachedUser uid
   case maybeCachedUser of
@@ -41,28 +41,28 @@ fetchUsersHandler uid = do
         Just user -> cacheUser uid user >> return user
         Nothing -> error "Could not find user with that ID"
 
-createUserHandler :: User -> AppMonad Int64
+createUserHandler :: (MonadDatabase m) => User -> m Int64
 createUserHandler = createUserDB
 
-fetchArticleHandler :: Int64 -> AppMonad Article
+fetchArticleHandler :: (MonadDatabase m) => Int64 -> m Article
 fetchArticleHandler aid = do
   maybeArticle <- fetchArticleDB aid
   case maybeArticle of
     Just article -> return article
     Nothing -> error "Could not find article with that ID"
 
-createArticleHandler :: Article -> AppMonad Int64
+createArticleHandler :: (MonadDatabase m)=> Article -> m Int64
 createArticleHandler = createArticleDB
 
-fetchArticlesByAuthorHandler :: Int64 -> AppMonad [KeyVal Article]
+fetchArticlesByAuthorHandler :: (MonadDatabase m) => Int64 -> m [KeyVal Article]
 fetchArticlesByAuthorHandler = fetchArticlesByAuthor
 
-fetchRecentArticlesHandler :: AppMonad [(KeyVal User, KeyVal Article)]
+fetchRecentArticlesHandler :: (MonadDatabase m) => m [(KeyVal User, KeyVal Article)]
 fetchRecentArticlesHandler = fetchRecentArticles
 
-fullAPIServer :: PGInfo -> RedisInfo -> Server FullAPI
-fullAPIServer pgInfo redisInfo =
-  enter (transformAppToHandler pgInfo redisInfo) $
+fullAPIServer :: (AppMonad :~> Handler) -> Server FullAPI
+fullAPIServer nt =
+  enter nt $
     fetchUsersHandler :<|>
     createUserHandler :<|>
     fetchArticleHandler :<|>
@@ -74,7 +74,7 @@ runServer :: IO ()
 runServer = do
   pgInfo <- fetchPostgresConnection
   redisInfo <- fetchRedisConnection
-  run 8000 (serve usersAPI (fullAPIServer pgInfo redisInfo))
+  run 8000 (serve usersAPI (fullAPIServer (transformAppToHandler pgInfo redisInfo)))
 
 fetchUserClient :: Int64 -> ClientM User
 createUserClient :: User -> ClientM Int64
