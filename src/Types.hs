@@ -7,6 +7,12 @@ import Data.Int (Int64)
 
 newtype KeyVal a = KeyVal (Int64, a)
 
+getKey :: KeyVal a -> Int64
+getKey (KeyVal (k, _)) = k
+
+getVal :: KeyVal a -> a
+getVal (KeyVal (_, v)) = v
+
 instance (ToJSON a) => ToJSON (KeyVal a) where
   toJSON (KeyVal (key, val)) = object
     [ "key" .= key

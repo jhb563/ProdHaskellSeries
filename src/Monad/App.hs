@@ -48,15 +48,15 @@ liftRedis action = do
   connection <- liftIO $ connect info
   liftIO $ runRedis connection action
 
+runAppAction :: Exception e => PGInfo -> RedisInfo -> AppMonad a -> IO (Either e a)
+runAppAction pgInfo redisInfo (AppMonad action) = do
+  result <- runPGAction pgInfo $ runReaderT action redisInfo
+  return $ Right result
+
 transformAppToHandler :: PGInfo -> RedisInfo -> AppMonad :~> Handler
 transformAppToHandler pgInfo redisInfo = NT $ \action -> do
-  result <- liftIO (handleAny handler (runAppAction action))
+  result <- liftIO (handleAny handler (runAppAction pgInfo redisInfo action))
   Handler $ either throwError return result
   where
     handler :: SomeException -> IO (Either ServantErr a)
     handler e = return $ Left $ err500 { errBody = pack (show e)}
-
-    runAppAction :: Exception e => AppMonad a -> IO (Either e a)
-    runAppAction (AppMonad action) = do
-      result <- runPGAction pgInfo $ runReaderT action redisInfo
-      return $ Right result

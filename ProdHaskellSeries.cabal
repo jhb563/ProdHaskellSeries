@@ -67,6 +67,7 @@ test-suite api-tests
     , http-client-tls
     , monad-logger
     , mtl
+    , safe-exceptions
     , servant-client
     , time
     , persistent-postgresql

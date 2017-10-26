@@ -9,7 +9,8 @@ import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Servant.Client (ClientEnv(..), parseBaseUrl)
 
 import API (runServer)
-import Database (PGInfo, fetchPostgresConnection, RedisInfo, fetchRedisConnection)
+import Cache (RedisInfo, fetchRedisConnection)
+import Database (PGInfo, fetchPostgresConnection)
 import Schema (migrateAll)
 
 setupTests :: IO (PGInfo, RedisInfo, ClientEnv, ThreadId)

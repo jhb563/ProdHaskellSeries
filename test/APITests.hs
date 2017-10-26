@@ -1,8 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
 import Control.Concurrent (killThread)
+import Control.Exception.Safe (SomeException)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad (forM, void)
 import Data.Either (isLeft, isRight)
 import Data.Int (Int64)
@@ -14,10 +17,14 @@ import Test.Hspec
 
 import API (fetchUserClient, createUserClient, createArticleClient, fetchArticleClient,
             fetchArticlesByAuthorClient, fetchRecentArticlesClient)
-import Database (PGInfo, RedisInfo, fetchUserPG, deleteUserPG, fetchUserRedis, deleteUserCache,
-                 deleteArticlePG, fetchArticlePG, createUserPG, createArticlePG)
+import Cache (RedisInfo)
+import Database (PGInfo)
+import Monad.App (runAppAction, AppMonad)
+import Monad.Cache (fetchCachedUser, deleteCachedUser)
+import Monad.Database (fetchUserDB, deleteUserDB, deleteArticleDB, fetchArticleDB, createUserDB, createArticleDB)
 import Schema (User(..), Article(..))
 import TestUtils (setupTests)
+import Types (KeyVal(..), getVal)
 
 main :: IO ()
 main = do
@@ -25,19 +32,30 @@ main = do
   hspec $ before (beforeHook1 clientEnv pgInfo redisInfo) spec1
   hspec $ before (beforeHook2 clientEnv pgInfo redisInfo) $ after (afterHook pgInfo redisInfo) $ spec2
   hspec $ before (beforeHook3 clientEnv pgInfo redisInfo) $ after (afterHook pgInfo redisInfo) $ spec3
-  hspec $ before (beforeHook4 clientEnv pgInfo) $ after (afterHook4 pgInfo redisInfo) $ spec4
-  hspec $ before (beforeHook5 clientEnv pgInfo) $ after (afterHook5 pgInfo redisInfo) $ spec5
-  hspec $ before (beforeHook6 clientEnv pgInfo) $ after (afterHook6 pgInfo redisInfo) $ spec6
+  hspec $ before (beforeHook4 clientEnv pgInfo redisInfo) $ after (afterHook4 pgInfo redisInfo) $ spec4
+  hspec $ before (beforeHook5 clientEnv pgInfo redisInfo) $ after (afterHook5 pgInfo redisInfo) $ spec5
+  hspec $ before (beforeHook6 clientEnv pgInfo redisInfo) $ after (afterHook6 pgInfo redisInfo) $ spec6
   killThread tid 
   return ()
 
+runAppIgnoreError :: String -> PGInfo -> RedisInfo -> AppMonad a -> IO a
+runAppIgnoreError msg pgInfo redisInfo action = do
+  (result :: Either SomeException a) <- runAppAction pgInfo redisInfo action
+  case result of
+    Left _ -> error msg
+    Right r -> return r
+
 beforeHook1 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Bool)
 beforeHook1 clientEnv pgInfo redisInfo = do
-  callResult <- runClientM (fetchUserClient 1) clientEnv
-  let throwsError = isLeft (callResult)
-  inPG <- isJust <$> fetchUserPG pgInfo 1
-  inRedis <- isJust <$> fetchUserRedis redisInfo 1
-  return (throwsError, inPG, inRedis)
+  (result :: Either SomeException (Bool, Bool, Bool)) <- runAppAction pgInfo redisInfo $ do
+    callResult <- liftIO $ runClientM (fetchUserClient 1) clientEnv
+    let throwsError = isLeft callResult
+    inPG <- isJust <$> fetchUserDB 1
+    inRedis <- isJust <$> fetchCachedUser 1
+    return (throwsError, inPG, inRedis)
+  case result of
+    Left _ -> error "Before Hook 1 Failed!"
+    Right r -> return r
 
 spec1 :: SpecWith (Bool, Bool, Bool)
 spec1 = describe "After fetching on an empty database" $ do
@@ -46,13 +64,13 @@ spec1 = describe "After fetching on an empty database" $ do
   it "There should be no user in Redis" $ \(_, _, inRedis) -> inRedis `shouldBe` False
 
 beforeHook2 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Int64)
-beforeHook2 clientEnv pgInfo redisInfo = do
-  userKeyEither <- runClientM (createUserClient testUser1) clientEnv
+beforeHook2 clientEnv pgInfo redisInfo = runAppIgnoreError "Before Hook 2" pgInfo redisInfo $ do
+  userKeyEither <- liftIO $ runClientM (createUserClient testUser1) clientEnv
   case userKeyEither of
     Left _ -> error "DB call failed on spec 2!"
     Right userKey -> do 
-      inPG <- isJust <$> fetchUserPG pgInfo userKey
-      inRedis <- isJust <$> fetchUserRedis redisInfo userKey
+      inPG <- isJust <$> fetchUserDB userKey
+      inRedis <- isJust <$> fetchCachedUser userKey
       return (inPG, inRedis, userKey)
 
 spec2 :: SpecWith (Bool, Bool, Int64)
@@ -61,19 +79,19 @@ spec2 = describe "After creating the user but not fetching" $ do
   it "There should be no user in Redis" $ \(_, inRedis, _) -> inRedis `shouldBe` False
 
 afterHook :: PGInfo -> RedisInfo -> (Bool, Bool, Int64) -> IO ()
-afterHook pgInfo redisInfo (_, _, key) = do
-  deleteUserCache redisInfo key
-  deleteUserPG pgInfo key
+afterHook pgInfo redisInfo (_, _, key) = runAppIgnoreError "After Hook" pgInfo redisInfo $ do
+  deleteCachedUser key
+  deleteUserDB key
 
 beforeHook3 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Int64)
-beforeHook3 clientEnv pgInfo redisInfo = do
-  userKeyEither <- runClientM (createUserClient testUser1) clientEnv
+beforeHook3 clientEnv pgInfo redisInfo = runAppIgnoreError "Before Hook 3" pgInfo redisInfo $ do
+  userKeyEither <- liftIO $ runClientM (createUserClient testUser1) clientEnv
   case userKeyEither of
     Left _ -> error "DB call failed on spec 3!"
     Right userKey -> do 
-      _ <- runClientM (fetchUserClient userKey) clientEnv 
-      inPG <- isJust <$> fetchUserPG pgInfo userKey
-      inRedis <- isJust <$> fetchUserRedis redisInfo userKey
+      _ <- liftIO $ runClientM (fetchUserClient userKey) clientEnv 
+      inPG <- isJust <$> fetchUserDB userKey
+      inRedis <- isJust <$> fetchCachedUser userKey
       return (inPG, inRedis, userKey)
 
 spec3 :: SpecWith (Bool, Bool, Int64)
@@ -81,16 +99,16 @@ spec3 = describe "After creating the user and fetching" $ do
   it "There should be a user in Postgres" $ \(inPG, _, _) -> inPG `shouldBe` True
   it "There should be a user in Redis" $ \(_, inRedis, _) -> inRedis `shouldBe` True
 
-beforeHook4 :: ClientEnv -> PGInfo -> IO (Bool, Bool, Int64, Int64)
-beforeHook4 clientEnv pgInfo = do
-  userKey <- createUserPG pgInfo testUser2
-  articleKeyEither <- runClientM (createArticleClient (testArticle1 userKey)) clientEnv
+beforeHook4 :: ClientEnv -> PGInfo -> RedisInfo -> IO (Bool, Bool, Int64, Int64)
+beforeHook4 clientEnv pgInfo redisInfo = runAppIgnoreError "Before Hook 4" pgInfo redisInfo $ do
+  userKey <- createUserDB testUser2
+  articleKeyEither <- liftIO $ runClientM (createArticleClient (testArticle1 userKey)) clientEnv
   case articleKeyEither of
     Left _ -> error "DB call failed on spec 4!"
     Right articleKey -> do
-      fetchResult <- runClientM (fetchArticleClient articleKey) clientEnv
+      fetchResult <- liftIO $ runClientM (fetchArticleClient articleKey) clientEnv
       let callSucceeds = isRight fetchResult
-      articleInPG <- isJust <$> fetchArticlePG pgInfo articleKey
+      articleInPG <- isJust <$> fetchArticleDB articleKey
       return (callSucceeds, articleInPG, userKey, articleKey)
 
 spec4 :: SpecWith (Bool, Bool, Int64, Int64)
@@ -103,17 +121,17 @@ afterHook4 pgInfo redisInfo (_, _, uid, aid) = deleteArtifacts pgInfo redisInfo 
 
 -- Create 5 articles, three belonging to 1 user and two belonging to another
 -- Returned articles should match our tests
-beforeHook5 :: ClientEnv -> PGInfo -> IO ([Article], [Article], Int64, Int64, [Int64])
-beforeHook5 clientEnv pgInfo = do
-  uid1 <- createUserPG pgInfo testUser3
-  uid2 <- createUserPG pgInfo testUser4
-  articleIds <- mapM (createArticlePG pgInfo)
+beforeHook5 :: ClientEnv -> PGInfo -> RedisInfo -> IO ([Article], [Article], Int64, Int64, [Int64])
+beforeHook5 clientEnv pgInfo redisInfo = runAppIgnoreError "Before Hook 5" pgInfo redisInfo $ do
+  uid1 <- createUserDB testUser3
+  uid2 <- createUserDB testUser4
+  articleIds <- mapM createArticleDB
     [ testArticle2 uid1, testArticle3 uid1, testArticle4 uid1
     , testArticle5 uid2, testArticle6 uid2 ]
-  firstArticles <- runClientM (fetchArticlesByAuthorClient uid1) clientEnv
-  secondArticles <- runClientM (fetchArticlesByAuthorClient uid2) clientEnv
+  firstArticles <- liftIO $ runClientM (fetchArticlesByAuthorClient uid1) clientEnv
+  secondArticles <- liftIO $ runClientM (fetchArticlesByAuthorClient uid2) clientEnv
   case (firstArticles, secondArticles) of
-    (Right as1, Right as2) -> return (entityVal <$> as1, entityVal <$> as2, uid1, uid2, articleIds)
+    (Right as1, Right as2) -> return (getVal <$> as1, getVal <$> as2, uid1, uid2, articleIds)
     _ -> error "Spec 5 failed!"
 
 -- Two tests, 3, 2
@@ -128,21 +146,21 @@ afterHook5 :: PGInfo -> RedisInfo -> ([Article], [Article], Int64, Int64, [Int64
 afterHook5 pgInfo redisInfo (_, _, uid1, uid2, aids) =
   deleteArtifacts pgInfo redisInfo [uid1, uid2] aids
 
-beforeHook6 :: ClientEnv -> PGInfo -> IO ([(User, Article)], Int64, Int64, [Int64])
-beforeHook6 clientEnv pgInfo = do
-  uid1 <- createUserPG pgInfo testUser5
-  uid2 <- createUserPG pgInfo testUser6
-  articleIds <- mapM (createArticlePG pgInfo)
+beforeHook6 :: ClientEnv -> PGInfo -> RedisInfo -> IO ([(User, Article)], Int64, Int64, [Int64])
+beforeHook6 clientEnv pgInfo redisInfo = runAppIgnoreError "Before Hook 6" pgInfo redisInfo $ do
+  uid1 <- createUserDB testUser5
+  uid2 <- createUserDB testUser6
+  articleIds <- mapM createArticleDB
     [ testArticle7 uid1, testArticle8 uid1, testArticle9 uid1, testArticle10 uid2
     , testArticle11 uid2, testArticle12 uid1, testArticle13 uid2, testArticle14 uid2
     , testArticle15 uid2, testArticle16 uid1, testArticle17 uid1, testArticle18 uid2
     ]
-  recentArticles <- runClientM fetchRecentArticlesClient clientEnv
+  recentArticles <- liftIO $ runClientM fetchRecentArticlesClient clientEnv
   case recentArticles of
-    Right as -> return (entityValTuple <$> as, uid1, uid2, articleIds)
+    Right as -> return (valTuple <$> as, uid1, uid2, articleIds)
     _ -> error "Spec 6 failed!"
   where
-    entityValTuple (Entity _ u, Entity _ a) = (u, a)
+    valTuple (KeyVal (_, u), KeyVal (_, a)) = (u, a)
 
 spec6 :: SpecWith ([(User, Article)], Int64, Int64, [Int64])
 spec6 = describe "When fetching recent articles" $ do
@@ -155,11 +173,11 @@ afterHook6 pgInfo redisInfo (_, uid1, uid2, aids) =
   deleteArtifacts pgInfo redisInfo [uid1, uid2] aids
 
 deleteArtifacts :: PGInfo -> RedisInfo -> [Int64] -> [Int64] -> IO ()
-deleteArtifacts pgInfo redisInfo users articles = do
-  void $ forM articles $ \a -> deleteArticlePG pgInfo a
+deleteArtifacts pgInfo redisInfo users articles = runAppIgnoreError "Deleting artifacts" pgInfo redisInfo  $ do
+  void $ forM articles $ \a -> deleteArticleDB a
   void $ forM users $ \u -> do
-    deleteUserCache redisInfo u
-    deleteUserPG pgInfo u
+    deleteCachedUser u
+    deleteUserDB u
 
 testUser1 :: User
 testUser1 = User
