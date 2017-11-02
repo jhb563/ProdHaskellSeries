@@ -19,6 +19,8 @@ library
     API
     Cache
     Database
+    Eff.Cache
+    Eff.Database
     Monad.App
     Monad.Cache
     Monad.Database
@@ -28,6 +30,7 @@ library
     base >= 4.7 && < 5
     , aeson
     , esqueleto
+    , freer-effects
     , monad-logger
     , mtl
     , persistent
