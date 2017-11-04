@@ -1,11 +1,16 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module API where
 
+import           Control.Monad.Freer (Eff, Member)
+import           Control.Monad.Logger (LoggingT)
 import           Data.Int (Int64)
 import           Data.Proxy (Proxy(..))
+import           Database.Persist.Sql (SqlPersistT)
+import           Database.Redis (Redis)
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Client
@@ -13,9 +18,9 @@ import           Servant.Server
 
 import           Cache (fetchRedisConnection)
 import           Database (fetchPostgresConnection)
-import           Monad.App (transformAppToHandler, AppMonad)
-import           Monad.Cache (MonadCache(..))
-import           Monad.Database (MonadDatabase(..))
+import           Eff.App (transformEffToHandler)
+import           Eff.Cache
+import           Eff.Database
 import           Schema
 import           Types (KeyVal(..))
 
@@ -30,7 +35,7 @@ type FullAPI =
 usersAPI :: Proxy FullAPI
 usersAPI = Proxy :: Proxy FullAPI
 
-fetchUsersHandler :: (MonadDatabase m, MonadCache m) => Int64 -> m User
+fetchUsersHandler :: (Member Database r, Member Cache r) => Int64 -> Eff r User
 fetchUsersHandler uid = do
   maybeCachedUser <- fetchCachedUser uid
   case maybeCachedUser of
@@ -41,26 +46,26 @@ fetchUsersHandler uid = do
         Just user -> cacheUser uid user >> return user
         Nothing -> error "Could not find user with that ID"
 
-createUserHandler :: (MonadDatabase m) => User -> m Int64
+createUserHandler :: (Member Database r) => User -> Eff r Int64
 createUserHandler = createUserDB
 
-fetchArticleHandler :: (MonadDatabase m) => Int64 -> m Article
+fetchArticleHandler :: (Member Database r) => Int64 -> Eff r Article
 fetchArticleHandler aid = do
   maybeArticle <- fetchArticleDB aid
   case maybeArticle of
     Just article -> return article
     Nothing -> error "Could not find article with that ID"
 
-createArticleHandler :: (MonadDatabase m)=> Article -> m Int64
+createArticleHandler :: (Member Database r) => Article -> Eff r Int64
 createArticleHandler = createArticleDB
 
-fetchArticlesByAuthorHandler :: (MonadDatabase m) => Int64 -> m [KeyVal Article]
+fetchArticlesByAuthorHandler :: (Member Database r) => Int64 -> Eff r [KeyVal Article]
 fetchArticlesByAuthorHandler = fetchArticlesByAuthor
 
-fetchRecentArticlesHandler :: (MonadDatabase m) => m [(KeyVal User, KeyVal Article)]
+fetchRecentArticlesHandler :: (Member Database r) => Eff r [(KeyVal User, KeyVal Article)]
 fetchRecentArticlesHandler = fetchRecentArticles
 
-fullAPIServer :: (AppMonad :~> Handler) -> Server FullAPI
+fullAPIServer :: ((Eff '[Cache, Redis, Database, SqlPersistT (LoggingT IO), IO]) :~> Handler) -> Server FullAPI
 fullAPIServer nt =
   enter nt $
     fetchUsersHandler :<|>
@@ -74,7 +79,7 @@ runServer :: IO ()
 runServer = do
   pgInfo <- fetchPostgresConnection
   redisInfo <- fetchRedisConnection
-  run 8000 (serve usersAPI (fullAPIServer (transformAppToHandler pgInfo redisInfo)))
+  run 8000 (serve usersAPI (fullAPIServer (transformEffToHandler pgInfo redisInfo)))
 
 fetchUserClient :: Int64 -> ClientM User
 createUserClient :: User -> ClientM Int64

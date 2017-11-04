@@ -12,9 +12,9 @@ import           Data.Maybe (listToMaybe)
 import           Database.Esqueleto (select, from, where_, (^.), val, (==.), on,
                                      InnerJoin(..), limit, orderBy, desc)
 import           Database.Persist (get, insert, delete, entityVal, Entity(..))
-import           Database.Persist.Sql (fromSqlKey, toSqlKey, ToBackendKey, SqlBackend)
-import           Database.Persist.Postgresql (SqlPersistT)
+import           Database.Persist.Sql (fromSqlKey, toSqlKey, ToBackendKey, SqlBackend, SqlPersistT)
 
+import           Database (runPGAction, PGInfo)
 import           Schema
 import           Types (KeyVal(..))
 
@@ -51,6 +51,9 @@ fetchArticlesByAuthor = send . FetchArticlesByAuthor
 
 fetchRecentArticles :: (Member Database r) => Eff r [(KeyVal User, KeyVal Article)]
 fetchRecentArticles = send FetchRecentArticles
+
+runSqlPersist :: (Member IO r) => PGInfo -> Eff ((SqlPersistT (LoggingT IO)) ': r) a -> Eff r a
+runSqlPersist pgInfo = runNat $ runPGAction pgInfo
 
 runDatabase :: (Member (SqlPersistT (LoggingT IO)) r) => Eff (Database ': r) a -> Eff r a
 runDatabase = runNat databaseToSql

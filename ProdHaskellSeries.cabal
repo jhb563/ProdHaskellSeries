@@ -19,6 +19,7 @@ library
     API
     Cache
     Database
+    Eff.App
     Eff.Cache
     Eff.Database
     Monad.App

@@ -7,10 +7,11 @@ module Eff.Cache where
 
 import Control.Monad (void)
 import Data.ByteString.Char8 (pack, unpack)
-import Database.Redis (Redis, get, setex, del)
+import Database.Redis (get, setex, del, runRedis, connect, Redis)
 import Control.Monad.Freer (Member, Eff, send, runNat)
 import Data.Int (Int64)
 
+import Cache (RedisInfo)
 import Schema
 
 data Cache a where
@@ -26,6 +27,14 @@ fetchCachedUser = send . FetchCachedUser
 
 deleteCachedUser :: (Member Cache r) => Int64 -> Eff r ()
 deleteCachedUser = send . DeleteCachedUser
+
+runRedisAction :: (Member IO r) => RedisInfo -> Eff (Redis ': r) a -> Eff r a
+runRedisAction redisInfo = runNat redisToIO
+  where
+    redisToIO :: Redis a -> IO a
+    redisToIO action = do
+      connection <- connect redisInfo
+      runRedis connection action
 
 runCache :: (Member Redis r) => Eff (Cache ': r) a -> Eff r a
 runCache = runNat cacheToRedis
