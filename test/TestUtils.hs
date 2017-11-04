@@ -1,10 +1,13 @@
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #-}
 
 module TestUtils where
 
 import Control.Concurrent (forkIO, ThreadId, threadDelay, newMVar, MVar)
+import Control.Monad.Freer (Eff)
 import Control.Monad.Logger (runStdoutLoggingT)
 import Control.Monad.Reader (runReaderT)
+import Control.Monad.State (StateT)
 import qualified Data.Map as Map
 import Database.Persist.Postgresql (withPostgresqlConn, runMigrationSilent)
 import Network.HTTP.Client (newManager)
@@ -17,7 +20,10 @@ import Servant.Server (serve, Server, (:~>), Handler, enter)
 import API
 import Cache (RedisInfo, fetchRedisConnection)
 import Database (PGInfo, fetchPostgresConnection)
+import Eff.Cache (Cache)
+import Eff.Database (Database)
 import Schema (migrateAll)
+import TestEff (transformTestEffToHandler)
 import TestMonad (transformTestToHandler, TestMonad, UserMap, ArticleMap)
 
 setupTests :: IO (PGInfo, RedisInfo, ClientEnv, ThreadId)
@@ -33,7 +39,7 @@ setupTests = do
   threadDelay 1000000
   return (pgInfo, redisInfo, clientEnv, tid)
 
-testAPIServer :: (TestMonad :~> Handler) -> Server FullAPI
+testAPIServer :: (Eff '[Cache, Database, StateT (UserMap, ArticleMap, UserMap) IO] :~> Handler) -> Server FullAPI
 testAPIServer nt =
   enter nt $
     fetchUsersHandler :<|>
@@ -51,6 +57,6 @@ setupTests' = do
   let initialMap = (Map.empty, Map.empty, Map.empty)
   mapRef <- newMVar initialMap
   tid <- forkIO $
-    run 8000 (serve usersAPI (testAPIServer (transformTestToHandler mapRef)))
+    run 8000 (serve usersAPI (testAPIServer (transformTestEffToHandler mapRef)))
   threadDelay 1000000
   return (clientEnv, mapRef, tid)

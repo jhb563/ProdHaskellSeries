@@ -62,6 +62,7 @@ test-suite api-tests
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   other-modules:
+    TestEff
     TestMonad
     TestUtils
   main-is:             APITests.hs
@@ -69,6 +70,7 @@ test-suite api-tests
     base
     , bytestring
     , containers
+    , freer-effects
     , hspec
     , http-client
     , http-client-tls
