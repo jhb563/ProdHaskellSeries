@@ -4,26 +4,20 @@
 module Main where
 
 import Control.Concurrent (killThread, MVar, readMVar, swapMVar)
-import Control.Exception.Safe (SomeException)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad (forM, void)
 import Control.Monad.State (runStateT)
 import Data.Either (isLeft, isRight)
 import Data.Int (Int64)
-import Data.Map (empty)
 import Data.Maybe (isJust)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Database.Persist.Postgresql (fromSqlKey, Key, toSqlKey, entityVal, Entity(..))
+import Database.Persist.Postgresql (toSqlKey)
 import Servant.Client (runClientM, ClientEnv)
 import Test.Hspec
 
 import API (fetchUserClient, createUserClient, createArticleClient, fetchArticleClient,
             fetchArticlesByAuthorClient, fetchRecentArticlesClient)
-import Cache (RedisInfo)
-import Database (PGInfo)
-import Monad.App (runAppAction, AppMonad)
-import Monad.Cache (fetchCachedUser, deleteCachedUser)
-import Monad.Database (fetchUserDB, deleteUserDB, deleteArticleDB, fetchArticleDB, createUserDB, createArticleDB)
+import Monad.Cache (fetchCachedUser)
+import Monad.Database (fetchUserDB, fetchArticleDB, createUserDB, createArticleDB)
 import Schema (User(..), Article(..))
 import TestMonad (TestMonad(..), UserMap, ArticleMap)
 import TestUtils (setupTests')
@@ -41,18 +35,11 @@ main = do
   killThread tid 
   return ()
 
-runAppIgnoreError :: String -> PGInfo -> RedisInfo -> AppMonad a -> IO a
-runAppIgnoreError msg pgInfo redisInfo action = do
-  (result :: Either SomeException a) <- runAppAction pgInfo redisInfo action
-  case result of
-    Left _ -> error msg
-    Right r -> return r
-
 runTestMonad :: MVar (UserMap, ArticleMap, UserMap) -> TestMonad a -> IO a
 runTestMonad mapVar (TestMonad action) = do
   currentState <- readMVar mapVar
   (result, newMap) <- runStateT action currentState
-  swapMVar mapVar newMap
+  _ <- swapMVar mapVar newMap
   return result
 
 beforeHook1 :: ClientEnv -> MVar (UserMap, ArticleMap, UserMap) -> IO (Bool, Bool, Bool)

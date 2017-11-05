@@ -6,28 +6,19 @@
 module TestEff where
 
 import           Control.Concurrent.MVar (MVar)
-import           Control.Exception.Safe (SomeException, Exception, handleAny)
 import           Control.Lens (view, _1, _2, _3)
 import           Control.Monad.Except (throwError)
 import           Control.Monad.Freer (Eff, Member, runNat, runM)
-import           Control.Monad.IO.Class (liftIO, MonadIO)
+import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.State (StateT, get, put)
-import           Data.ByteString.Lazy.Char8 (pack)
 import           Data.List (sortBy)
 import qualified Data.Map as Map
 import           Database.Persist.Postgresql (toSqlKey, fromSqlKey)
-import           Servant.Server ((:~>)(..), Handler, ServantErr(..), Handler(..), err500,
-                                 runHandler)
-
-{-import           Control.Exception.Safe (SomeException, Exception, handleAny)
-import           Control.Monad.Except (throwError)
-import           Control.Monad.State (StateT, get, put, runStateT, void)
-import           Control.Monad.IO.Class (liftIO, MonadIO)
-import           Data.List (sortBy)
--}
+import           Servant.Server ((:~>)(..), Handler, Handler(..))
 
 import           Eff.Cache (Cache(..))
 import           Eff.Database(Database(..))
+import           Errors (runWithServantHandler)
 import           Schema
 import           TestMonad (UserMap, ArticleMap, runStateTWithPointer)
 import           Types (KeyVal(..))
@@ -36,13 +27,10 @@ import           Types (KeyVal(..))
 transformTestEffToHandler :: MVar (UserMap, ArticleMap, UserMap) -> Eff '[Cache, Database, StateT (UserMap, ArticleMap, UserMap) IO] :~> Handler
 transformTestEffToHandler sharedMap = NT $ \action -> do
   let stateAct = (runTestDatabase . runTestCache) action
-  result <- liftIO (handleAny handler (runRight stateAct))
+  result <- liftIO (runWithServantHandler (runRight stateAct))
   Handler $ either throwError return result
   where
-    handler :: SomeException -> IO (Either ServantErr a)
-    handler e = return $ Left $ err500 { errBody = pack (show e)}
-
-    runRight :: (Exception e) => Eff '[StateT (UserMap, ArticleMap, UserMap) IO] a -> IO (Either e a)
+    runRight :: Eff '[StateT (UserMap, ArticleMap, UserMap) IO] a -> IO a
     runRight action = do
       let stateAction = runM action
       runStateTWithPointer stateAction sharedMap

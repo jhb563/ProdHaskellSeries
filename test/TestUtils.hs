@@ -24,7 +24,7 @@ import Eff.Cache (Cache)
 import Eff.Database (Database)
 import Schema (migrateAll)
 import TestEff (transformTestEffToHandler)
-import TestMonad (transformTestToHandler, TestMonad, UserMap, ArticleMap)
+import TestMonad (UserMap, ArticleMap)
 
 setupTests :: IO (PGInfo, RedisInfo, ClientEnv, ThreadId)
 setupTests = do
@@ -33,7 +33,7 @@ setupTests = do
   mgr <- newManager tlsManagerSettings
   baseUrl <- parseBaseUrl "http://127.0.0.1:8000"
   let clientEnv = ClientEnv mgr baseUrl
-  runStdoutLoggingT $ withPostgresqlConn pgInfo $ \dbConn ->
+  _ <- runStdoutLoggingT $ withPostgresqlConn pgInfo $ \dbConn ->
     runReaderT (runMigrationSilent migrateAll) dbConn
   tid <- forkIO runServer
   threadDelay 1000000

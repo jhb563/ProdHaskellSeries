@@ -3,18 +3,17 @@
 
 module Monad.App where
 
-import Control.Exception.Safe (handleAny, SomeException, Exception)
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (LoggingT)
 import Control.Monad.Reader (ReaderT(..), ask)
-import Data.ByteString.Lazy.Char8 (pack)
 import Database.Persist.Sql (SqlPersistT)
 import Database.Redis (runRedis, connect, Redis)
-import Servant.Server ((:~>)(..), Handler, ServantErr(..), Handler(..), err500)
+import Servant.Server ((:~>)(..), Handler, Handler(..))
 
 import Cache (RedisInfo)
 import Database (runPGAction, PGInfo)
+import Errors (runWithServantHandler)
 import Monad.Cache (MonadCache(..))
 import Monad.Database (MonadDatabase(..))
 
@@ -48,15 +47,10 @@ liftRedis action = do
   connection <- liftIO $ connect info
   liftIO $ runRedis connection action
 
-runAppAction :: Exception e => PGInfo -> RedisInfo -> AppMonad a -> IO (Either e a)
-runAppAction pgInfo redisInfo (AppMonad action) = do
-  result <- runPGAction pgInfo $ runReaderT action redisInfo
-  return $ Right result
+runAppAction :: PGInfo -> RedisInfo -> AppMonad a -> IO a
+runAppAction pgInfo redisInfo (AppMonad action) = runPGAction pgInfo $ runReaderT action redisInfo
 
 transformAppToHandler :: PGInfo -> RedisInfo -> AppMonad :~> Handler
 transformAppToHandler pgInfo redisInfo = NT $ \action -> do
-  result <- liftIO (handleAny handler (runAppAction pgInfo redisInfo action))
+  result <- liftIO (runWithServantHandler (runAppAction pgInfo redisInfo action))
   Handler $ either throwError return result
-  where
-    handler :: SomeException -> IO (Either ServantErr a)
-    handler e = return $ Left $ err500 { errBody = pack (show e)}

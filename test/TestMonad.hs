@@ -3,7 +3,6 @@
 
 module TestMonad where
 
-import           Control.Exception.Safe (SomeException, Exception, handleAny)
 import           Control.Monad.Except (throwError)
 import           Control.Concurrent.MVar (MVar, readMVar, swapMVar)
 import           Control.Lens (view, _1, _2, _3)
@@ -12,13 +11,10 @@ import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Data.Int (Int64)
 import           Data.List (sortBy)
 import qualified Data.Map as Map
-import           Data.ByteString.Lazy.Char8 (pack)
 import           Database.Persist.Postgresql (toSqlKey, fromSqlKey)
-import           Servant.Server ((:~>)(..), Handler, ServantErr(..), Handler(..), err500,
-                                 runHandler)
+import           Servant.Server ((:~>)(..), Handler, Handler(..))
 
-import           Cache (RedisInfo)
-import           Database (PGInfo)
+import           Errors (runWithServantHandler)
 import           Monad.Cache (MonadCache(..))
 import           Monad.Database(MonadDatabase(..))
 import           Schema
@@ -35,19 +31,16 @@ instance MonadIO TestMonad where
 
 transformTestToHandler :: MVar (UserMap, ArticleMap, UserMap) -> TestMonad :~> Handler
 transformTestToHandler sharedMap = NT $ \(TestMonad action) -> do
-  result <- liftIO $ handleAny handler $
+  result <- liftIO $ runWithServantHandler $
     runStateTWithPointer action sharedMap 
   Handler $ either throwError return result
-  where
-    handler :: SomeException -> IO (Either ServantErr a)
-    handler e = return $ Left $ err500 { errBody = pack (show e) }
 
-runStateTWithPointer :: (Exception e, MonadIO m) => StateT s m a -> MVar s -> m (Either e a)
+runStateTWithPointer :: MonadIO m => StateT s m a -> MVar s -> m a
 runStateTWithPointer action ref = do
   env <- liftIO $ readMVar ref
   (val, newEnv) <- runStateT action env
   void $ liftIO $ swapMVar ref newEnv
-  return $ Right val
+  return val
 
 instance MonadDatabase TestMonad where
   fetchUserDB uid = TestMonad $ do
