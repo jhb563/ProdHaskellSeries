@@ -27,11 +27,11 @@ import           Types (KeyVal(..))
 transformTestEffToHandler :: MVar (UserMap, ArticleMap, UserMap) -> Eff '[Cache, Database, StateT (UserMap, ArticleMap, UserMap) IO] :~> Handler
 transformTestEffToHandler sharedMap = NT $ \action -> do
   let stateAct = (runTestDatabase . runTestCache) action
-  result <- liftIO (runWithServantHandler (runRight stateAct))
+  result <- liftIO (runWithServantHandler (runEff stateAct))
   Handler $ either throwError return result
   where
-    runRight :: Eff '[StateT (UserMap, ArticleMap, UserMap) IO] a -> IO a
-    runRight action = do
+    runEff :: Eff '[StateT (UserMap, ArticleMap, UserMap) IO] a -> IO a
+    runEff action = do
       let stateAction = runM action
       runStateTWithPointer stateAction sharedMap
     
